@@ -1,0 +1,96 @@
+# Recording Rules
+# Pre-compute expensive queries for efficient dashboard rendering
+
+groups:
+  # ═══ HTTP Request Metrics ═════════════════════
+  - name: http_requests
+    interval: 15s
+    rules:
+      # Request rate by job
+      - record: job:http_requests:rate5m
+        expr: sum(rate(http_requests_total[5m])) by (job)
+
+      # Error rate by job (5xx responses / total)
+      - record: job:http_request_errors:rate5m
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m])) by (job)
+          /
+          sum(rate(http_requests_total[5m])) by (job)
+
+      # Request rate by status code
+      - record: job:http_requests_by_status:rate5m
+        expr: sum(rate(http_requests_total[5m])) by (job, status)
+
+      # P50 latency
+      - record: job:http_request_duration_seconds:p50
+        expr: histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, job))
+
+      # P90 latency
+      - record: job:http_request_duration_seconds:p90
+        expr: histogram_quantile(0.90, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, job))
+
+      # P99 latency
+      - record: job:http_request_duration_seconds:p99
+        expr: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, job))
+
+  # ═══ SLO Metrics ══════════════════════════════
+  - name: slo_metrics
+    interval: 30s
+    rules:
+      # Error ratio over different windows (for burn-rate alerting)
+      - record: job:slo_errors_per_request:ratio_rate5m
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m])) by (job)
+          /
+          sum(rate(http_requests_total[5m])) by (job)
+
+      - record: job:slo_errors_per_request:ratio_rate30m
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[30m])) by (job)
+          /
+          sum(rate(http_requests_total[30m])) by (job)
+
+      - record: job:slo_errors_per_request:ratio_rate1h
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[1h])) by (job)
+          /
+          sum(rate(http_requests_total[1h])) by (job)
+
+      - record: job:slo_errors_per_request:ratio_rate6h
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[6h])) by (job)
+          /
+          sum(rate(http_requests_total[6h])) by (job)
+
+      # Availability (1 - error rate) over 30 days
+      - record: job:slo_availability:ratio_rate30d
+        expr: |
+          1 - (
+            sum(rate(http_requests_total{status=~"5.."}[30d])) by (job)
+            /
+            sum(rate(http_requests_total[30d])) by (job)
+          )
+
+  # ═══ Infrastructure Metrics ═══════════════════
+  - name: infrastructure_metrics
+    interval: 30s
+    rules:
+      # CPU usage percentage
+      - record: instance:node_cpu_utilization:ratio
+        expr: 1 - avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))
+
+      # Memory usage percentage
+      - record: instance:node_memory_utilization:ratio
+        expr: 1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+
+      # Disk usage percentage
+      - record: instance:node_disk_utilization:ratio
+        expr: 1 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"})
+
+      # Network receive rate
+      - record: instance:node_network_receive_bytes:rate5m
+        expr: sum(rate(node_network_receive_bytes_total[5m])) by (instance)
+
+      # Network transmit rate
+      - record: instance:node_network_transmit_bytes:rate5m
+        expr: sum(rate(node_network_transmit_bytes_total[5m])) by (instance)
