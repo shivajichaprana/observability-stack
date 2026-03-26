@@ -1,0 +1,5 @@
+# No external dependencies required
+# Uses Python standard library only:
+# - http.server (metrics endpoint)
+# - threading (background traffic simulation)
+# - math, random (realistic metric generation)

@@ -1,0 +1,171 @@
+# Alerting Rules
+# Organized by category: infrastructure, application, SLO burn-rate
+
+groups:
+  # ═══ Infrastructure Alerts ════════════════════
+  - name: infrastructure
+    rules:
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          category: infrastructure
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 80% (current: {{ $value | printf \"%.1f\" }}%) for more than 5 minutes."
+          runbook_url: "https://github.com/shivajichaprana/observability-stack/blob/main/docs/runbook.md#high-cpu"
+
+      - alert: CriticalCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 95
+        for: 2m
+        labels:
+          severity: critical
+          category: infrastructure
+        annotations:
+          summary: "Critical CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 95% (current: {{ $value | printf \"%.1f\" }}%) for more than 2 minutes."
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          category: infrastructure
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 85% (current: {{ $value | printf \"%.1f\" }}%)."
+
+      - alert: DiskSpaceRunningLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 15
+        for: 10m
+        labels:
+          severity: warning
+          category: infrastructure
+        annotations:
+          summary: "Disk space running low on {{ $labels.instance }}"
+          description: "Less than 15% disk space remaining ({{ $value | printf \"%.1f\" }}% free)."
+
+      - alert: DiskSpaceCritical
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 5
+        for: 5m
+        labels:
+          severity: critical
+          category: infrastructure
+        annotations:
+          summary: "Disk space critical on {{ $labels.instance }}"
+          description: "Less than 5% disk space remaining. Immediate action required."
+
+  # ═══ Container Alerts ═════════════════════════
+  - name: containers
+    rules:
+      - alert: ContainerHighCPU
+        expr: rate(container_cpu_usage_seconds_total{name!=""}[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          category: container
+        annotations:
+          summary: "Container {{ $labels.name }} high CPU"
+          description: "Container CPU usage is above 80%."
+
+      - alert: ContainerHighMemory
+        expr: (container_memory_usage_bytes{name!=""} / container_spec_memory_limit_bytes{name!=""}) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          category: container
+        annotations:
+          summary: "Container {{ $labels.name }} high memory"
+          description: "Container memory usage is above 85% of limit."
+
+      - alert: ContainerRestarting
+        expr: increase(container_restart_count{name!=""}[1h]) > 3
+        for: 0m
+        labels:
+          severity: warning
+          category: container
+        annotations:
+          summary: "Container {{ $labels.name }} restarting frequently"
+          description: "Container has restarted {{ $value }} times in the last hour."
+
+  # ═══ Application Alerts ═══════════════════════
+  - name: application
+    rules:
+      - alert: HighErrorRate
+        expr: job:http_request_errors:rate5m > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          category: application
+        annotations:
+          summary: "High error rate for {{ $labels.job }}"
+          description: "Error rate is above 5% (current: {{ $value | printf \"%.2f\" | humanizePercentage }})."
+
+      - alert: CriticalErrorRate
+        expr: job:http_request_errors:rate5m > 0.10
+        for: 2m
+        labels:
+          severity: critical
+          category: application
+        annotations:
+          summary: "Critical error rate for {{ $labels.job }}"
+          description: "Error rate is above 10%. Possible outage."
+
+      - alert: HighLatencyP99
+        expr: job:http_request_duration_seconds:p99 > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          category: application
+        annotations:
+          summary: "High P99 latency for {{ $labels.job }}"
+          description: "P99 latency is above 1 second (current: {{ $value | printf \"%.2f\" }}s)."
+
+      - alert: HighLatencyP50
+        expr: job:http_request_duration_seconds:p50 > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          category: application
+        annotations:
+          summary: "High median latency for {{ $labels.job }}"
+          description: "Median latency is above 500ms."
+
+  # ═══ SLO Burn-Rate Alerts ═════════════════════
+  # Multi-window burn-rate alerting for 99.9% availability SLO
+  - name: slo-burn-rate
+    rules:
+      # Fast burn (2% budget consumed in 1 hour) — page immediately
+      - alert: SLOBurnRateFast
+        expr: |
+          (
+            job:slo_errors_per_request:ratio_rate1h > (14.4 * 0.001)
+            and
+            job:slo_errors_per_request:ratio_rate5m > (14.4 * 0.001)
+          )
+        for: 2m
+        labels:
+          severity: critical
+          category: slo
+          slo: availability
+        annotations:
+          summary: "Fast SLO burn rate — error budget depleting rapidly"
+          description: "At the current error rate, the monthly error budget will be exhausted in less than 2 hours."
+
+      # Slow burn (5% budget consumed in 6 hours) — ticket
+      - alert: SLOBurnRateSlow
+        expr: |
+          (
+            job:slo_errors_per_request:ratio_rate6h > (6 * 0.001)
+            and
+            job:slo_errors_per_request:ratio_rate30m > (6 * 0.001)
+          )
+        for: 15m
+        labels:
+          severity: warning
+          category: slo
+          slo: availability
+        annotations:
+          summary: "Slow SLO burn rate — error budget being consumed"
+          description: "At the current error rate, the monthly error budget will be exhausted in less than 5 days."
