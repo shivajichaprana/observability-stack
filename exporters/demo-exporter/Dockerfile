@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-LABEL maintainer="Shivaji Chaprana <shivajichaprana97@gmail.com>"
+LABEL maintainer="Project Maintainers"
 
 WORKDIR /app
 
